@@ -11,20 +11,32 @@ dependencies = [
     "optimum>=1.23.3",
     "pillow>=11.1.0",
     "prometheus-client>=0.21.1",
+    "pydantic-settings>=2.7.1",
     "requests>=2.32.3",
     "rich>=13.9.4",
     "timm>=1.0.14",
-    "torch>=2.6.0.dev20241213",
-    "torchvision>=0.22.0.dev20241213",
+    "torch>=2.5.1",
+    "torchvision>=0.2.0",
     "transformers>=4.48.1",
     "uvicorn>=0.34.0",
 ]
 
 [tool.uv.sources]
-torch = [{ index = "pytorch-cpu" }]
-torchvision = [{ index = "pytorch-cpu" }]
+torch = [
+    { index = "pytorch-mac", marker = "sys_platform == 'darwin'" },
+    { index = "pytorch-any", marker = "sys_platform != 'darwin'" },
+]
+torchvision = [
+    { index = "pytorch-mac", marker = "sys_platform == 'darwin'" },
+    { index = "pytorch-any", marker = "sys_platform != 'darwin'" },
+]
 
 [[tool.uv.index]]
-name = "pytorch-cpu"
+name = "pytorch-mac"
+url = "https://download.pytorch.org/whl/nightly/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-any"
 url = "https://download.pytorch.org/whl/nightly/cpu"
 explicit = true

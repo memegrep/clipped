@@ -10,10 +10,11 @@ import time
 import torch
 from dataclasses import dataclass, field
 from typing import Optional, List, Union, Literal, Dict, Any
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from transformers import AutoProcessor, AutoConfig
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+from pydantic_settings import BaseSettings
 from rich.console import Console
 from rich.logging import RichHandler
 from PIL import Image
@@ -38,14 +39,19 @@ logging.basicConfig(
 logger = logging.getLogger("rich")
 
 
-class ServerConfig:
-    """Server configuration with sane defaults"""
+class ServerConfig(BaseSettings):
+    """Server configuration with environment variables"""
 
-    MAX_QUEUE_SIZE = 1000
-    BATCH_TIMEOUT = 0.01
-    BATCH_SIZE = 32
-    MAX_RETRIES = 3
-    HEALTH_CHECK_INTERVAL = 30
+    MAX_QUEUE_SIZE: int = 1000
+    BATCH_TIMEOUT: float = 0.01
+    BATCH_SIZE: int = 32
+    MAX_RETRIES: int = 3
+    HEALTH_CHECK_INTERVAL: int = 30
+    MODEL_NAME: str = "jinaai/jina-clip-v1"
+    API_KEY: Optional[str] = None
+
+
+config = ServerConfig()
 
 
 @dataclass
@@ -65,9 +71,9 @@ class BatchHandler:
     def __init__(
         self,
         model_path: str,
-        batch_size: int = ServerConfig.BATCH_SIZE,
-        max_queue_size: int = ServerConfig.MAX_QUEUE_SIZE,
-        batch_timeout: float = ServerConfig.BATCH_TIMEOUT,
+        batch_size: int = config.BATCH_SIZE,
+        max_queue_size: int = config.MAX_QUEUE_SIZE,
+        batch_timeout: float = config.BATCH_TIMEOUT,
     ):
         self.batch_size = batch_size
         self.max_queue_size = max_queue_size
@@ -109,7 +115,7 @@ class BatchHandler:
         session_options.graph_optimization_level = (
             ort.GraphOptimizationLevel.ORT_ENABLE_ALL
         )
-        session_options.intra_op_num_threads = os.cpu_count()
+        # session_options.intra_op_num_threads = os.cpu_count()
         providers = [
             ("CPUExecutionProvider", {"arena_extend_strategy": "kNextPowerOfTwo"})
         ]
@@ -130,7 +136,7 @@ class BatchHandler:
             except Exception as e:
                 logger.error(f"Health check failed: {e}")
                 self._healthy = False
-            await asyncio.sleep(ServerConfig.HEALTH_CHECK_INTERVAL)
+            await asyncio.sleep(config.HEALTH_CHECK_INTERVAL)
 
     async def process_batches(self):
         """Process batches for both text and image queues concurrently"""
@@ -214,7 +220,7 @@ class BatchHandler:
 
         start = time.perf_counter()
 
-        for attempt in range(ServerConfig.MAX_RETRIES):
+        for attempt in range(config.MAX_RETRIES):
             try:
                 inputs = self.processor(
                     text=texts, padding=True, truncation=True, return_tensors="np"
@@ -234,9 +240,9 @@ class BatchHandler:
                 return normalized
 
             except Exception as e:
-                if attempt == ServerConfig.MAX_RETRIES - 1:
+                if attempt == config.MAX_RETRIES - 1:
                     raise BatchProcessingError(
-                        f"Text batch processing failed after {ServerConfig.MAX_RETRIES} attempts: {e}"
+                        f"Text batch processing failed after {config.MAX_RETRIES} attempts: {e}"
                     )
                 logger.warning(f"Text batch attempt {attempt + 1} failed: {e}")
                 await asyncio.sleep(0.1 * (attempt + 1))
@@ -264,7 +270,7 @@ class BatchHandler:
                 raise ValueError("Invalid image type")
             processed_images.append(image)
 
-        for attempt in range(ServerConfig.MAX_RETRIES):
+        for attempt in range(config.MAX_RETRIES):
             try:
                 inputs = self.processor(images=processed_images, return_tensors="np")
                 outputs = self.vision_model.run(
@@ -282,9 +288,9 @@ class BatchHandler:
 
                 return normalized
             except Exception as e:
-                if attempt == ServerConfig.MAX_RETRIES - 1:
+                if attempt == config.MAX_RETRIES - 1:
                     raise BatchProcessingError(
-                        f"Image batch processing failed after {ServerConfig.MAX_RETRIES} attempts: {e}"
+                        f"Image batch processing failed after {config.MAX_RETRIES} attempts: {e}"
                     )
                 logger.warning(f"Image batch attempt {attempt + 1} failed: {e}")
                 await asyncio.sleep(0.1 * (attempt + 1))
@@ -328,6 +334,23 @@ class EmbeddingResponse(BaseModel):
 
 
 app = FastAPI()
+
+
+@app.middleware("http")
+async def verify_api_key(request: Request, call_next):
+    if not config.API_KEY:
+        return await call_next(request)
+
+    if request.url.path == "/health":
+        return await call_next(request)
+
+    api_key = request.headers.get("X-API-Key")
+    if api_key != config.API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid API Key")
+
+    return await call_next(request)
+
+
 handler: Optional[BatchHandler] = None
 
 
