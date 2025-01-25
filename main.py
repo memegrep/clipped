@@ -145,55 +145,6 @@ class BatchHandler:
             for task in tasks:
                 task.cancel()
             raise
-        # while not self._shutdown:
-        #     try:
-        #         # Get first task to determine batch type
-        #         first_task = await self._batch_queue.get()
-        #         batch_type = first_task.type
-        #         batch_tasks = [first_task]
-        #         batch_inputs = first_task.inputs.copy()
-        #         batch_start = time.monotonic()
-        #
-        #         # Collect additional tasks of same type
-        #         while len(batch_inputs) < self.batch_size:
-        #             try:
-        #                 # Wait max 10ms to fill batch
-        #                 task = await asyncio.wait_for(
-        #                     self._batch_queue.get(),
-        #                     timeout=0.01 - (time.monotonic() - batch_start),
-        #                 )
-        #                 if (
-        #                     task.type == batch_type
-        #                     and (len(batch_inputs) + len(task.inputs))
-        #                     <= self.batch_size
-        #                 ):
-        #                     batch_tasks.append(task)
-        #                     batch_inputs.extend(task.inputs)
-        #                 else:
-        #                     # Put back and stop collecting
-        #                     await self._batch_queue.put(task)
-        #                     break
-        #             except asyncio.TimeoutError:
-        #                 break  # Stop waiting for more tasks
-        #
-        #         # Process the batch
-        #         if batch_type == "text":
-        #             embeddings = await self._process_text_batch(batch_inputs)
-        #         else:
-        #             embeddings = await self._process_image_batch(batch_inputs)
-        #
-        #         # Distribute results to futures
-        #         start_idx = 0
-        #         for task in batch_tasks:
-        #             end_idx = start_idx + len(task.inputs)
-        #             task.future.set_result(embeddings[start_idx:end_idx])
-        #             start_idx = end_idx
-        #
-        #     except Exception as e:
-        #         logger.error(f"Batch processing error: {e}")
-        #         # Mark futures as errored
-        #         for task in batch_tasks:
-        #             task.future.set_exception(e)
 
     async def _process_queue(self, queue_type: Literal["text", "image"]):
         """Process a single modality queue"""
